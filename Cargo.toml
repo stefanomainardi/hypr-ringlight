@@ -1,0 +1,20 @@
+[package]
+name = "hypr-ringlight"
+version = "0.1.0"
+edition = "2021"
+description = "A customizable ring light overlay for Hyprland/Wayland, inspired by macOS Sequoia's Edge Light"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/stefanomainardi/hypr-ringlight"
+keywords = ["hyprland", "wayland", "overlay", "ring-light", "linux"]
+categories = ["gui", "multimedia"]
+authors = ["Stefano Mainardi"]
+readme = "README.md"
+
+[dependencies]
+smithay-client-toolkit = "0.20"
+wayland-client = "0.31"
+calloop = "0.14"
+clap = { version = "4", features = ["derive"] }
+ksni = "0.2"
+env_logger = "0.11"
+log = "0.4"
