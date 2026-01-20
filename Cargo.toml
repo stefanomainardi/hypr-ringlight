@@ -2,7 +2,7 @@
 name = "hypr-ringlight"
 version = "0.1.0"
 edition = "2021"
-description = "A customizable ring light overlay for Hyprland/Wayland, inspired by macOS Sequoia's Edge Light"
+description = "A customizable ring light overlay for Hyprland/Wayland, inspired by macOS Tahoe's Edge Light"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/stefanomainardi/hypr-ringlight"
 keywords = ["hyprland", "wayland", "overlay", "ring-light", "linux"]
