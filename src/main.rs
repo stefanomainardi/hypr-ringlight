@@ -4,7 +4,7 @@ mod tui;
 
 use std::collections::HashMap;
 use std::sync::atomic::Ordering;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 use clap::{Parser, Subcommand};
@@ -130,8 +130,6 @@ struct MonitorInfo {
 /// Extended shared state with IPC support
 struct SharedState {
     ipc: Arc<IpcState>,
-    /// Map of output name -> enabled
-    monitors: RwLock<Vec<MonitorInfo>>,
 }
 
 impl SharedState {
@@ -146,42 +144,32 @@ impl SharedState {
     ) -> Self {
         Self {
             ipc: Arc::new(IpcState::new(color, thickness, opacity, glow, corner_radius, animation, animation_speed)),
-            monitors: RwLock::new(Vec::new()),
         }
     }
     
     fn toggle_monitor(&self, id: &str) {
-        if let Ok(mut monitors) = self.monitors.write() {
-            if let Some(m) = monitors.iter_mut().find(|m| m.id == id) {
-                m.enabled = !m.enabled;
-            }
-        }
+        self.ipc.toggle_monitor(id);
+        self.ipc.save_to_config();
     }
     
     fn is_monitor_enabled(&self, id: &str) -> bool {
-        if let Ok(monitors) = self.monitors.read() {
-            monitors.iter().find(|m| m.id == id).map(|m| m.enabled).unwrap_or(true)
-        } else {
-            true
-        }
+        self.ipc.is_monitor_enabled(id)
     }
     
     fn add_monitor(&self, id: String, display_name: String) {
-        if let Ok(mut monitors) = self.monitors.write() {
-            if !monitors.iter().any(|m| m.id == id) {
-                monitors.push(MonitorInfo { id, display_name, enabled: true });
-            }
-        }
+        self.ipc.add_monitor(id, display_name);
     }
     
     fn remove_monitor(&self, id: &str) {
-        if let Ok(mut monitors) = self.monitors.write() {
-            monitors.retain(|m| m.id != id);
-        }
+        self.ipc.remove_monitor(id);
     }
     
     fn get_monitors(&self) -> Vec<MonitorInfo> {
-        self.monitors.read().map(|m| m.clone()).unwrap_or_default()
+        self.ipc.get_monitors().into_iter().map(|m| MonitorInfo {
+            id: m.id,
+            display_name: m.display_name,
+            enabled: m.enabled,
+        }).collect()
     }
 }
 

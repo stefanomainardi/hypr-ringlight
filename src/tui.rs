@@ -9,7 +9,7 @@ use ratatui::{
     widgets::*,
 };
 use crate::config::Config;
-use crate::ipc::{self, Command};
+use crate::ipc::{self, Command, MonitorState};
 
 /// Color presets with hex values
 const COLOR_PRESETS: &[(&str, &str)] = &[
@@ -57,6 +57,7 @@ enum Screen {
     AnimationSpeed,
     BarHeight,
     BarPosition,
+    Monitors,
 }
 
 struct App {
@@ -68,6 +69,7 @@ struct App {
     input_buffer: String,
     input_mode: bool,
     live_mode: bool, // true if connected to running instance
+    monitors: Vec<MonitorState>, // cached monitors list
 }
 
 impl App {
@@ -93,6 +95,13 @@ impl App {
             Config::load()
         };
         
+        // Get monitors if live
+        let monitors = if live_mode {
+            ipc::get_monitors().unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        
         Self {
             config,
             screen: Screen::Main,
@@ -106,6 +115,13 @@ impl App {
             input_buffer: String::new(),
             input_mode: false,
             live_mode,
+            monitors,
+        }
+    }
+
+    fn refresh_monitors(&mut self) {
+        if self.live_mode {
+            self.monitors = ipc::get_monitors().unwrap_or_default();
         }
     }
 
@@ -120,6 +136,7 @@ impl App {
             "Animation Speed",
             "Bar Height",
             "Bar Position",
+            "Monitors",
             "─────────────────",
             "Save Config",
             "Exit",
@@ -179,8 +196,8 @@ impl App {
                 if self.selected > 0 {
                     self.selected -= 1;
                     // Skip separator
-                    if self.screen == Screen::Main && self.selected == 9 {
-                        self.selected = 8;
+                    if self.screen == Screen::Main && self.selected == 10 {
+                        self.selected = 9;
                     }
                 }
             }
@@ -189,8 +206,8 @@ impl App {
                 if self.selected < max - 1 {
                     self.selected += 1;
                     // Skip separator
-                    if self.screen == Screen::Main && self.selected == 9 {
-                        self.selected = 10;
+                    if self.screen == Screen::Main && self.selected == 10 {
+                        self.selected = 11;
                     }
                 }
             }
@@ -203,13 +220,14 @@ impl App {
 
     fn max_items(&self) -> usize {
         match self.screen {
-            Screen::Main => 12,
+            Screen::Main => 13,
             Screen::Color => COLOR_PRESETS.len() + 1, // +1 for custom
             Screen::Thickness => THICKNESS_PRESETS.len() + 1,
             Screen::Animation => ANIMATION_PRESETS.len(),
             Screen::Opacity | Screen::Glow | Screen::CornerRadius | 
             Screen::AnimationSpeed | Screen::BarHeight => 5,
             Screen::BarPosition => 4,
+            Screen::Monitors => self.monitors.len().max(1), // at least 1 for "no monitors" message
         }
     }
 
@@ -226,14 +244,23 @@ impl App {
                     6 => { self.screen = Screen::AnimationSpeed; self.selected = 0; }
                     7 => { self.screen = Screen::BarHeight; self.selected = 0; }
                     8 => { self.screen = Screen::BarPosition; self.selected = 0; }
-                    10 => { // Save Config
+                    9 => { // Monitors
+                        if self.live_mode {
+                            self.refresh_monitors();
+                            self.screen = Screen::Monitors; 
+                            self.selected = 0;
+                        } else {
+                            self.message = Some("Monitors only available in live mode".to_string());
+                        }
+                    }
+                    11 => { // Save Config
                         if let Err(e) = self.config.save() {
                             self.message = Some(format!("Error: {}", e));
                         } else {
                             self.message = Some(format!("Saved to {}", Config::path().display()));
                         }
                     }
-                    11 => { self.should_quit = true; }
+                    12 => { self.should_quit = true; }
                     _ => {}
                 }
             }
@@ -332,6 +359,26 @@ impl App {
                 self.screen = Screen::Main;
                 self.selected = 0;
                 self.message = Some("Bar position requires restart to apply".to_string());
+            }
+            Screen::Monitors => {
+                if !self.monitors.is_empty() && self.selected < self.monitors.len() {
+                    let monitor = &self.monitors[self.selected];
+                    let new_enabled = !monitor.enabled;
+                    let id = monitor.id.clone();
+                    
+                    // Send command to toggle
+                    if let Err(e) = ipc::set_monitor_enabled(&id, new_enabled) {
+                        self.message = Some(format!("Error: {}", e));
+                    } else {
+                        // Refresh local state
+                        self.refresh_monitors();
+                        self.message = Some(format!(
+                            "{} {}",
+                            if new_enabled { "Enabled" } else { "Disabled" },
+                            self.monitors.get(self.selected).map(|m| m.display_name.as_str()).unwrap_or(&id)
+                        ));
+                    }
+                }
             }
         }
     }
@@ -491,6 +538,7 @@ fn draw(frame: &mut Frame, app: &App) {
         Screen::AnimationSpeed => " Select Animation Speed ",
         Screen::BarHeight => " Select Bar Height ",
         Screen::BarPosition => " Select Bar Position ",
+        Screen::Monitors => " Monitors (Enter to toggle) ",
     };
     
     let items: Vec<ListItem> = match app.screen {
@@ -620,6 +668,27 @@ fn draw(frame: &mut Frame, app: &App) {
                 };
                 ListItem::new(format!(" {}", item)).style(style)
             }).collect()
+        }
+        Screen::Monitors => {
+            if app.monitors.is_empty() {
+                vec![ListItem::new(" No monitors detected (is hypr-ringlight running?)").style(Style::default().fg(yellow))]
+            } else {
+                app.monitors.iter().enumerate().map(|(i, m)| {
+                    let status = if m.enabled { "[ON] " } else { "[OFF]" };
+                    let status_color = if m.enabled { green } else { Color::Red };
+                    let style = if i == app.selected {
+                        Style::default().fg(surface0).bg(mauve).bold()
+                    } else {
+                        Style::default().fg(text)
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::raw(" "),
+                        Span::styled(status, Style::default().fg(status_color).bold()),
+                        Span::raw(" "),
+                        Span::styled(format!("{} ({})", m.display_name, m.id), style),
+                    ]))
+                }).collect()
+            }
         }
     };
     

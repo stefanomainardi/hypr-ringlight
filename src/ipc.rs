@@ -2,7 +2,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, AtomicU8, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, RwLock};
 use serde::{Deserialize, Serialize};
 
 /// Socket path
@@ -26,6 +26,8 @@ pub enum Command {
     SetAnimationSpeed(u32),
     SetVisible(bool),
     GetState,
+    GetMonitors,
+    SetMonitorEnabled { id: String, enabled: bool },
     Quit,
 }
 
@@ -42,6 +44,20 @@ pub struct State {
     pub visible: bool,
 }
 
+/// Monitor info for IPC
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorState {
+    pub id: String,
+    pub display_name: String,
+    pub enabled: bool,
+}
+
+/// Response with monitors list
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MonitorsResponse {
+    pub monitors: Vec<MonitorState>,
+}
+
 /// Shared state that can be modified via IPC
 pub struct IpcState {
     pub color_r: AtomicU8,
@@ -54,6 +70,8 @@ pub struct IpcState {
     pub animation_mode: AtomicU8,
     pub animation_speed: AtomicU32,
     pub visible: std::sync::atomic::AtomicBool,
+    /// Monitors list (id, display_name, enabled)
+    pub monitors: RwLock<Vec<(String, String, bool)>>,
 }
 
 impl IpcState {
@@ -77,6 +95,7 @@ impl IpcState {
             animation_mode: AtomicU8::new(animation),
             animation_speed: AtomicU32::new(animation_speed),
             visible: std::sync::atomic::AtomicBool::new(true),
+            monitors: RwLock::new(Vec::new()),
         }
     }
 
@@ -128,6 +147,57 @@ impl IpcState {
 
     pub fn is_visible(&self) -> bool {
         self.visible.load(Ordering::Relaxed)
+    }
+
+    // Monitor management
+    pub fn add_monitor(&self, id: String, display_name: String) {
+        if let Ok(mut monitors) = self.monitors.write() {
+            if !monitors.iter().any(|(mid, _, _)| mid == &id) {
+                monitors.push((id, display_name, true));
+            }
+        }
+    }
+
+    pub fn remove_monitor(&self, id: &str) {
+        if let Ok(mut monitors) = self.monitors.write() {
+            monitors.retain(|(mid, _, _)| mid != id);
+        }
+    }
+
+    pub fn toggle_monitor(&self, id: &str) {
+        if let Ok(mut monitors) = self.monitors.write() {
+            if let Some((_, _, enabled)) = monitors.iter_mut().find(|(mid, _, _)| mid == id) {
+                *enabled = !*enabled;
+            }
+        }
+    }
+
+    pub fn set_monitor_enabled(&self, id: &str, enabled: bool) {
+        if let Ok(mut monitors) = self.monitors.write() {
+            if let Some((_, _, en)) = monitors.iter_mut().find(|(mid, _, _)| mid == id) {
+                *en = enabled;
+            }
+        }
+    }
+
+    pub fn is_monitor_enabled(&self, id: &str) -> bool {
+        if let Ok(monitors) = self.monitors.read() {
+            monitors.iter().find(|(mid, _, _)| mid == id).map(|(_, _, en)| *en).unwrap_or(true)
+        } else {
+            true
+        }
+    }
+
+    pub fn get_monitors(&self) -> Vec<MonitorState> {
+        if let Ok(monitors) = self.monitors.read() {
+            monitors.iter().map(|(id, name, en)| MonitorState {
+                id: id.clone(),
+                display_name: name.clone(),
+                enabled: *en,
+            }).collect()
+        } else {
+            Vec::new()
+        }
     }
 }
 
@@ -220,6 +290,16 @@ fn handle_client(mut stream: UnixStream, state: &Arc<IpcState>) -> bool {
                 let json = serde_json::to_string(&response).unwrap();
                 let _ = writeln!(stream, "{}", json);
             }
+            Command::GetMonitors => {
+                let response = MonitorsResponse {
+                    monitors: state.get_monitors(),
+                };
+                let json = serde_json::to_string(&response).unwrap();
+                let _ = writeln!(stream, "{}", json);
+            }
+            Command::SetMonitorEnabled { id, enabled } => {
+                state.set_monitor_enabled(&id, enabled);
+            }
             Command::Quit => {
                 return true; // Signal to quit
             }
@@ -283,6 +363,39 @@ pub fn send_command(cmd: &Command) -> Result<Option<State>, String> {
     }
     
     Ok(None)
+}
+
+/// Client: get monitors from running instance
+pub fn get_monitors() -> Result<Vec<MonitorState>, String> {
+    let path = socket_path();
+    
+    let mut stream = UnixStream::connect(&path)
+        .map_err(|_| "hypr-ringlight is not running".to_string())?;
+    
+    let json = serde_json::to_string(&Command::GetMonitors).map_err(|e| e.to_string())?;
+    writeln!(stream, "{}", json).map_err(|e| e.to_string())?;
+    
+    let reader = BufReader::new(stream);
+    if let Some(Ok(line)) = reader.lines().next() {
+        let response: MonitorsResponse = serde_json::from_str(&line).map_err(|e| e.to_string())?;
+        return Ok(response.monitors);
+    }
+    
+    Ok(Vec::new())
+}
+
+/// Client: set monitor enabled state
+pub fn set_monitor_enabled(id: &str, enabled: bool) -> Result<(), String> {
+    let path = socket_path();
+    
+    let mut stream = UnixStream::connect(&path)
+        .map_err(|_| "hypr-ringlight is not running".to_string())?;
+    
+    let cmd = Command::SetMonitorEnabled { id: id.to_string(), enabled };
+    let json = serde_json::to_string(&cmd).map_err(|e| e.to_string())?;
+    writeln!(stream, "{}", json).map_err(|e| e.to_string())?;
+    
+    Ok(())
 }
 
 /// Check if the server is running
