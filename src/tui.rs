@@ -70,15 +70,16 @@ struct App {
     input_mode: bool,
     live_mode: bool, // true if connected to running instance
     monitors: Vec<MonitorState>, // cached monitors list
+    visible: bool, // ring light visibility
 }
 
 impl App {
     fn new() -> Self {
         let live_mode = ipc::is_running();
-        let config = if live_mode {
+        let (config, visible) = if live_mode {
             // Try to get current state from running instance
             if let Ok(Some(state)) = ipc::send_command(&Command::GetState) {
-                Config {
+                (Config {
                     color: state.color,
                     thickness: state.thickness,
                     opacity: state.opacity,
@@ -87,12 +88,12 @@ impl App {
                     animation: state.animation,
                     animation_speed: state.animation_speed,
                     ..Config::default()
-                }
+                }, state.visible)
             } else {
-                Config::load()
+                (Config::load(), true)
             }
         } else {
-            Config::load()
+            (Config::load(), true)
         };
         
         // Get monitors if live
@@ -116,6 +117,7 @@ impl App {
             input_mode: false,
             live_mode,
             monitors,
+            visible,
         }
     }
 
@@ -125,21 +127,28 @@ impl App {
         }
     }
 
-    fn main_menu_items(&self) -> Vec<&str> {
+    fn main_menu_items(&self) -> Vec<String> {
+        let toggle_label = if self.visible { 
+            "Ring Light: ON" 
+        } else { 
+            "Ring Light: OFF" 
+        };
         vec![
-            "Color",
-            "Thickness", 
-            "Opacity",
-            "Glow",
-            "Corner Radius",
-            "Animation",
-            "Animation Speed",
-            "Bar Height",
-            "Bar Position",
-            "Monitors",
-            "─────────────────",
-            "Save Config",
-            "Exit",
+            toggle_label.to_string(),
+            "─────────────────".to_string(),
+            "Color".to_string(),
+            "Thickness".to_string(), 
+            "Opacity".to_string(),
+            "Glow".to_string(),
+            "Corner Radius".to_string(),
+            "Animation".to_string(),
+            "Animation Speed".to_string(),
+            "Bar Height".to_string(),
+            "Bar Position".to_string(),
+            "Monitors".to_string(),
+            "─────────────────".to_string(),
+            "Save Config".to_string(),
+            "Exit".to_string(),
         ]
     }
 
@@ -195,9 +204,13 @@ impl App {
             KeyCode::Up | KeyCode::Char('k') => {
                 if self.selected > 0 {
                     self.selected -= 1;
-                    // Skip separator
-                    if self.screen == Screen::Main && self.selected == 10 {
-                        self.selected = 9;
+                    // Skip separators (at index 1 and 12)
+                    if self.screen == Screen::Main && (self.selected == 1 || self.selected == 12) {
+                        if self.selected == 1 {
+                            self.selected = 0;
+                        } else {
+                            self.selected = 11;
+                        }
                     }
                 }
             }
@@ -205,9 +218,9 @@ impl App {
                 let max = self.max_items();
                 if self.selected < max - 1 {
                     self.selected += 1;
-                    // Skip separator
-                    if self.screen == Screen::Main && self.selected == 10 {
-                        self.selected = 11;
+                    // Skip separators (at index 1 and 12)
+                    if self.screen == Screen::Main && (self.selected == 1 || self.selected == 12) {
+                        self.selected += 1;
                     }
                 }
             }
@@ -220,7 +233,7 @@ impl App {
 
     fn max_items(&self) -> usize {
         match self.screen {
-            Screen::Main => 13,
+            Screen::Main => 15, // toggle + sep + 10 options + sep + save + exit
             Screen::Color => COLOR_PRESETS.len() + 1, // +1 for custom
             Screen::Thickness => THICKNESS_PRESETS.len() + 1,
             Screen::Animation => ANIMATION_PRESETS.len(),
@@ -235,16 +248,23 @@ impl App {
         match self.screen {
             Screen::Main => {
                 match self.selected {
-                    0 => { self.screen = Screen::Color; self.selected = 0; }
-                    1 => { self.screen = Screen::Thickness; self.selected = 0; }
-                    2 => { self.screen = Screen::Opacity; self.selected = 0; }
-                    3 => { self.screen = Screen::Glow; self.selected = 0; }
-                    4 => { self.screen = Screen::CornerRadius; self.selected = 0; }
-                    5 => { self.screen = Screen::Animation; self.selected = 0; }
-                    6 => { self.screen = Screen::AnimationSpeed; self.selected = 0; }
-                    7 => { self.screen = Screen::BarHeight; self.selected = 0; }
-                    8 => { self.screen = Screen::BarPosition; self.selected = 0; }
-                    9 => { // Monitors
+                    0 => { // Toggle visibility
+                        self.visible = !self.visible;
+                        if self.live_mode {
+                            let _ = ipc::send_command(&Command::SetVisible(self.visible));
+                        }
+                        self.message = Some(format!("Ring Light {}", if self.visible { "ON" } else { "OFF" }));
+                    }
+                    2 => { self.screen = Screen::Color; self.selected = 0; }
+                    3 => { self.screen = Screen::Thickness; self.selected = 0; }
+                    4 => { self.screen = Screen::Opacity; self.selected = 0; }
+                    5 => { self.screen = Screen::Glow; self.selected = 0; }
+                    6 => { self.screen = Screen::CornerRadius; self.selected = 0; }
+                    7 => { self.screen = Screen::Animation; self.selected = 0; }
+                    8 => { self.screen = Screen::AnimationSpeed; self.selected = 0; }
+                    9 => { self.screen = Screen::BarHeight; self.selected = 0; }
+                    10 => { self.screen = Screen::BarPosition; self.selected = 0; }
+                    11 => { // Monitors
                         if self.live_mode {
                             self.refresh_monitors();
                             self.screen = Screen::Monitors; 
@@ -253,14 +273,14 @@ impl App {
                             self.message = Some("Monitors only available in live mode".to_string());
                         }
                     }
-                    11 => { // Save Config
+                    13 => { // Save Config
                         if let Err(e) = self.config.save() {
                             self.message = Some(format!("Error: {}", e));
                         } else {
                             self.message = Some(format!("Saved to {}", Config::path().display()));
                         }
                     }
-                    12 => { self.should_quit = true; }
+                    14 => { self.should_quit = true; }
                     _ => {}
                 }
             }
@@ -543,15 +563,37 @@ fn draw(frame: &mut Frame, app: &App) {
     
     let items: Vec<ListItem> = match app.screen {
         Screen::Main => {
-            app.main_menu_items().iter().enumerate().map(|(i, item)| {
-                let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
-                } else if item.starts_with('─') {
-                    Style::default().fg(Color::DarkGray)
+            let menu_items = app.main_menu_items();
+            menu_items.iter().enumerate().map(|(i, item)| {
+                let is_toggle = i == 0;
+                let is_separator = item.starts_with('─');
+                
+                if is_toggle {
+                    // Special styling for ON/OFF toggle
+                    let (status, status_color) = if app.visible {
+                        ("ON", green)
+                    } else {
+                        ("OFF", Color::Red)
+                    };
+                    let base_style = if i == app.selected {
+                        Style::default().fg(surface0).bg(mauve).bold()
+                    } else {
+                        Style::default().fg(text)
+                    };
+                    ListItem::new(Line::from(vec![
+                        Span::raw(" Ring Light: "),
+                        Span::styled(status, Style::default().fg(status_color).bold()),
+                    ])).style(base_style)
+                } else if is_separator {
+                    ListItem::new(format!(" {} ", item)).style(Style::default().fg(Color::DarkGray))
                 } else {
-                    Style::default().fg(text)
-                };
-                ListItem::new(format!(" {} ", item)).style(style)
+                    let style = if i == app.selected {
+                        Style::default().fg(surface0).bg(mauve).bold()
+                    } else {
+                        Style::default().fg(text)
+                    };
+                    ListItem::new(format!(" {} ", item)).style(style)
+                }
             }).collect()
         }
         Screen::Color => {
