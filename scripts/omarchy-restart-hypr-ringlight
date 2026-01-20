@@ -1,0 +1,6 @@
+#!/bin/bash
+
+# Reload hypr-ringlight configuration (used by Omarchy theme switching).
+# Sends SIGUSR2 to trigger theme color reload.
+
+killall -SIGUSR2 hypr-ringlight 2>/dev/null

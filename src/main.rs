@@ -1,5 +1,7 @@
+mod camera;
 mod config;
 mod ipc;
+mod theme;
 mod tui;
 
 use std::collections::HashMap;
@@ -9,6 +11,8 @@ use std::time::Instant;
 
 use clap::{Parser, Subcommand};
 use ksni::{menu::StandardItem, menu::SubMenu, menu::RadioGroup, menu::RadioItem, menu::CheckmarkItem, Tray, TrayService};
+use signal_hook::consts::SIGUSR2;
+use signal_hook::iterator::Signals;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
     delegate_compositor, delegate_layer, delegate_output, delegate_registry, delegate_shm,
@@ -717,6 +721,9 @@ fn main() {
     // Load config file, then override with CLI args
     let mut cfg = Config::load();
     
+    // Track if color was explicitly set
+    let color_explicitly_set = cli.color.is_some();
+    
     if let Some(v) = cli.color { cfg.color = v; }
     if let Some(v) = cli.thickness { cfg.thickness = v; }
     if let Some(v) = cli.opacity { cfg.opacity = v; }
@@ -727,9 +734,22 @@ fn main() {
     if let Some(v) = cli.bar_height { cfg.bar_height = v; }
     if let Some(v) = cli.bar_position { cfg.bar_position = v; }
     
+    // If color wasn't explicitly set via CLI and config has default, try Omarchy theme
+    let initial_color = if !color_explicitly_set && cfg.color == "ffffff" {
+        // Try to get accent color from Omarchy theme
+        if let Some(color) = theme::get_accent_color() {
+            log::info!("Using Omarchy theme accent color: #{:02x}{:02x}{:02x}", color.0, color.1, color.2);
+            color
+        } else {
+            parse_hex_color(&cfg.color)
+        }
+    } else {
+        parse_hex_color(&cfg.color)
+    };
+    
     // Create shared state with all config values
     let state = Arc::new(SharedState::new(
-        parse_hex_color(&cfg.color),
+        initial_color,
         cfg.thickness,
         cfg.opacity,
         cfg.glow,
@@ -741,6 +761,19 @@ fn main() {
 
     // Start IPC server for live config updates
     ipc::start_server(state.ipc.clone());
+
+    // Set up SIGUSR2 handler for Omarchy theme reload
+    let signal_state = state.clone();
+    std::thread::spawn(move || {
+        let mut signals = Signals::new(&[SIGUSR2]).expect("Failed to create signal handler");
+        for _ in signals.forever() {
+            // Reload theme colors from Omarchy
+            if let Some((r, g, b)) = theme::get_accent_color() {
+                signal_state.ipc.set_color(r, g, b);
+                log::info!("Reloaded Omarchy theme color: #{:02x}{:02x}{:02x}", r, g, b);
+            }
+        }
+    });
 
     // Connect to Wayland
     let conn = Connection::connect_to_env().expect("Failed to connect to Wayland");
@@ -800,6 +833,18 @@ fn main() {
         });
         let _ = service.run();
     });
+
+    // Start camera monitor for video call notifications
+    let camera_visible = Arc::new(std::sync::atomic::AtomicBool::new(true));
+    let camera_visible_ref = camera_visible.clone();
+    let camera_state = state.clone();
+    std::thread::spawn(move || {
+        loop {
+            camera_visible_ref.store(camera_state.ipc.is_visible(), Ordering::Relaxed);
+            std::thread::sleep(std::time::Duration::from_secs(1));
+        }
+    });
+    camera::start_camera_monitor(camera_visible);
 
     // Event loop
     loop {

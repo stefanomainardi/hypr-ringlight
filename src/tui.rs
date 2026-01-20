@@ -10,6 +10,58 @@ use ratatui::{
 };
 use crate::config::Config;
 use crate::ipc::{self, Command, MonitorState};
+use crate::theme;
+
+/// UI color theme - loaded from Omarchy if available, otherwise Catppuccin Mocha defaults
+struct UiTheme {
+    accent: Color,      // Primary accent color (mauve/highlight)
+    secondary: Color,   // Secondary accent (blue)
+    background: Color,  // Surface background
+    text: Color,        // Normal text
+    success: Color,     // Green/success
+    warning: Color,     // Yellow/warning
+    error: Color,       // Red/error
+}
+
+impl UiTheme {
+    fn load() -> Self {
+        // Try to load from Omarchy theme
+        if let Some(colors) = theme::load_omarchy_colors() {
+            let accent = colors.accent.as_ref()
+                .map(|c| hex_to_color(c))
+                .unwrap_or(Color::Rgb(203, 166, 247)); // mauve fallback
+            
+            let background = colors.background.as_ref()
+                .map(|c| hex_to_color(c))
+                .unwrap_or(Color::Rgb(49, 50, 68)); // surface0 fallback
+            
+            let text = colors.foreground.as_ref()
+                .map(|c| hex_to_color(c))
+                .unwrap_or(Color::Rgb(205, 214, 244)); // text fallback
+            
+            Self {
+                accent,
+                secondary: accent, // Use accent as secondary too
+                background,
+                text,
+                success: Color::Rgb(166, 227, 161),  // Keep green
+                warning: Color::Rgb(249, 226, 175),  // Keep yellow
+                error: Color::Red,
+            }
+        } else {
+            // Catppuccin Mocha defaults
+            Self {
+                accent: Color::Rgb(203, 166, 247),   // mauve
+                secondary: Color::Rgb(137, 180, 250), // blue
+                background: Color::Rgb(49, 50, 68),  // surface0
+                text: Color::Rgb(205, 214, 244),     // text
+                success: Color::Rgb(166, 227, 161),  // green
+                warning: Color::Rgb(249, 226, 175),  // yellow
+                error: Color::Red,
+            }
+        }
+    }
+}
 
 /// Color presets with hex values
 const COLOR_PRESETS: &[(&str, &str)] = &[
@@ -71,6 +123,7 @@ struct App {
     live_mode: bool, // true if connected to running instance
     monitors: Vec<MonitorState>, // cached monitors list
     visible: bool, // ring light visibility
+    theme: UiTheme, // UI color theme
 }
 
 impl App {
@@ -118,6 +171,7 @@ impl App {
             live_mode,
             monitors,
             visible,
+            theme: UiTheme::load(),
         }
     }
 
@@ -460,16 +514,16 @@ fn hex_to_color(hex: &str) -> Color {
 fn draw(frame: &mut Frame, app: &App) {
     let area = frame.area();
     
-    // Colors - Catppuccin Mocha
-    let mauve = Color::Rgb(203, 166, 247);
-    let blue = Color::Rgb(137, 180, 250);
-    let surface0 = Color::Rgb(49, 50, 68);
-    let text = Color::Rgb(205, 214, 244);
-    let green = Color::Rgb(166, 227, 161);
-    let yellow = Color::Rgb(249, 226, 175);
+    // Use theme colors from Omarchy or defaults
+    let accent = app.theme.accent;
+    let secondary = app.theme.secondary;
+    let background = app.theme.background;
+    let text = app.theme.text;
+    let success = app.theme.success;
+    let warning = app.theme.warning;
     
     // Clear background
-    frame.render_widget(Block::default().style(Style::default().bg(surface0)), area);
+    frame.render_widget(Block::default().style(Style::default().bg(background)), area);
     
     // Layout
     let chunks = Layout::default()
@@ -489,7 +543,7 @@ fn draw(frame: &mut Frame, app: &App) {
     } else {
         "hypr-ringlight configurator [OFFLINE]"
     };
-    let title_color = if app.live_mode { green } else { yellow };
+    let title_color = if app.live_mode { success } else { warning };
     
     let title = Paragraph::new(title_text)
         .style(Style::default().fg(title_color).bold())
@@ -497,7 +551,7 @@ fn draw(frame: &mut Frame, app: &App) {
         .block(Block::default()
             .borders(Borders::ALL)
             .border_type(BorderType::Double)
-            .border_style(Style::default().fg(blue)));
+            .border_style(Style::default().fg(secondary)));
     frame.render_widget(title, chunks[0]);
     
     // Current settings with color preview
@@ -510,40 +564,40 @@ fn draw(frame: &mut Frame, app: &App) {
         ]),
         Line::from(vec![
             Span::styled("Thickness:      ", Style::default().fg(text)),
-            Span::styled(format!("{}px", app.config.thickness), Style::default().fg(green)),
+            Span::styled(format!("{}px", app.config.thickness), Style::default().fg(success)),
         ]),
         Line::from(vec![
             Span::styled("Opacity:        ", Style::default().fg(text)),
-            Span::styled(format!("{}", app.config.opacity), Style::default().fg(green)),
+            Span::styled(format!("{}", app.config.opacity), Style::default().fg(success)),
         ]),
         Line::from(vec![
             Span::styled("Glow:           ", Style::default().fg(text)),
-            Span::styled(format!("{}px", app.config.glow), Style::default().fg(green)),
+            Span::styled(format!("{}px", app.config.glow), Style::default().fg(success)),
         ]),
         Line::from(vec![
             Span::styled("Corner Radius:  ", Style::default().fg(text)),
-            Span::styled(format!("{}x", app.config.corner_radius), Style::default().fg(green)),
+            Span::styled(format!("{}x", app.config.corner_radius), Style::default().fg(success)),
         ]),
         Line::from(vec![
             Span::styled("Animation:      ", Style::default().fg(text)),
-            Span::styled(&app.config.animation, Style::default().fg(green)),
+            Span::styled(&app.config.animation, Style::default().fg(success)),
         ]),
         Line::from(vec![
             Span::styled("Anim Speed:     ", Style::default().fg(text)),
-            Span::styled(format!("{}", app.config.animation_speed), Style::default().fg(green)),
+            Span::styled(format!("{}", app.config.animation_speed), Style::default().fg(success)),
         ]),
         Line::from(vec![
             Span::styled("Bar:            ", Style::default().fg(text)),
-            Span::styled(format!("{}px @ {}", app.config.bar_height, app.config.bar_position), Style::default().fg(green)),
+            Span::styled(format!("{}px @ {}", app.config.bar_height, app.config.bar_position), Style::default().fg(success)),
         ]),
     ];
     
     let settings = Paragraph::new(settings_text)
         .block(Block::default()
             .title(" Current Settings ")
-            .title_style(Style::default().fg(mauve).bold())
+            .title_style(Style::default().fg(accent).bold())
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(blue)));
+            .border_style(Style::default().fg(secondary)));
     frame.render_widget(settings, chunks[1]);
     
     // Menu area
@@ -571,12 +625,12 @@ fn draw(frame: &mut Frame, app: &App) {
                 if is_toggle {
                     // Special styling for ON/OFF toggle
                     let (status, status_color) = if app.visible {
-                        ("ON", green)
+                        ("ON", success)
                     } else {
                         ("OFF", Color::Red)
                     };
                     let base_style = if i == app.selected {
-                        Style::default().fg(surface0).bg(mauve).bold()
+                        Style::default().fg(background).bg(accent).bold()
                     } else {
                         Style::default().fg(text)
                     };
@@ -588,7 +642,7 @@ fn draw(frame: &mut Frame, app: &App) {
                     ListItem::new(format!(" {} ", item)).style(Style::default().fg(Color::DarkGray))
                 } else {
                     let style = if i == app.selected {
-                        Style::default().fg(surface0).bg(mauve).bold()
+                        Style::default().fg(background).bg(accent).bold()
                     } else {
                         Style::default().fg(text)
                     };
@@ -599,7 +653,7 @@ fn draw(frame: &mut Frame, app: &App) {
         Screen::Color => {
             let mut items: Vec<ListItem> = COLOR_PRESETS.iter().enumerate().map(|(i, (name, hex))| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -612,7 +666,7 @@ fn draw(frame: &mut Frame, app: &App) {
             }).collect();
             
             let custom_style = if app.selected == COLOR_PRESETS.len() {
-                Style::default().fg(surface0).bg(mauve).bold()
+                Style::default().fg(background).bg(accent).bold()
             } else {
                 Style::default().fg(text)
             };
@@ -622,7 +676,7 @@ fn draw(frame: &mut Frame, app: &App) {
         Screen::Thickness => {
             let mut items: Vec<ListItem> = THICKNESS_PRESETS.iter().enumerate().map(|(i, (name, val))| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -630,7 +684,7 @@ fn draw(frame: &mut Frame, app: &App) {
             }).collect();
             
             let custom_style = if app.selected == THICKNESS_PRESETS.len() {
-                Style::default().fg(surface0).bg(mauve).bold()
+                Style::default().fg(background).bg(accent).bold()
             } else {
                 Style::default().fg(text)
             };
@@ -640,7 +694,7 @@ fn draw(frame: &mut Frame, app: &App) {
         Screen::Opacity => {
             ["25%", "50%", "75%", "100%", "✎  Custom..."].iter().enumerate().map(|(i, item)| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -651,7 +705,7 @@ fn draw(frame: &mut Frame, app: &App) {
             ["Subtle (40px)", "Normal (80px)", "Strong (120px)", "Maximum (160px)", "✎  Custom..."]
                 .iter().enumerate().map(|(i, item)| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -662,7 +716,7 @@ fn draw(frame: &mut Frame, app: &App) {
             ["Sharp (1.0x)", "Normal (2.5x)", "Round (4.0x)", "Very Round (6.0x)", "✎  Custom..."]
                 .iter().enumerate().map(|(i, item)| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -672,7 +726,7 @@ fn draw(frame: &mut Frame, app: &App) {
         Screen::Animation => {
             ANIMATION_PRESETS.iter().enumerate().map(|(i, (name, _))| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -683,7 +737,7 @@ fn draw(frame: &mut Frame, app: &App) {
             ["Fast (60)", "Normal (120)", "Slow (240)", "Very Slow (480)", "✎  Custom..."]
                 .iter().enumerate().map(|(i, item)| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -694,7 +748,7 @@ fn draw(frame: &mut Frame, app: &App) {
             ["None (0px)", "Small (25px)", "Normal (35px)", "Large (45px)", "✎  Custom..."]
                 .iter().enumerate().map(|(i, item)| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -704,7 +758,7 @@ fn draw(frame: &mut Frame, app: &App) {
         Screen::BarPosition => {
             ["Top", "Bottom", "Left", "Right"].iter().enumerate().map(|(i, item)| {
                 let style = if i == app.selected {
-                    Style::default().fg(surface0).bg(mauve).bold()
+                    Style::default().fg(background).bg(accent).bold()
                 } else {
                     Style::default().fg(text)
                 };
@@ -713,13 +767,13 @@ fn draw(frame: &mut Frame, app: &App) {
         }
         Screen::Monitors => {
             if app.monitors.is_empty() {
-                vec![ListItem::new(" No monitors detected (is hypr-ringlight running?)").style(Style::default().fg(yellow))]
+                vec![ListItem::new(" No monitors detected (is hypr-ringlight running?)").style(Style::default().fg(warning))]
             } else {
                 app.monitors.iter().enumerate().map(|(i, m)| {
                     let status = if m.enabled { "[ON] " } else { "[OFF]" };
-                    let status_color = if m.enabled { green } else { Color::Red };
+                    let status_color = if m.enabled { success } else { Color::Red };
                     let style = if i == app.selected {
-                        Style::default().fg(surface0).bg(mauve).bold()
+                        Style::default().fg(background).bg(accent).bold()
                     } else {
                         Style::default().fg(text)
                     };
@@ -737,9 +791,9 @@ fn draw(frame: &mut Frame, app: &App) {
     let menu = List::new(items)
         .block(Block::default()
             .title(menu_title)
-            .title_style(Style::default().fg(mauve).bold())
+            .title_style(Style::default().fg(accent).bold())
             .borders(Borders::ALL)
-            .border_style(Style::default().fg(blue)));
+            .border_style(Style::default().fg(secondary)));
     frame.render_widget(menu, chunks[2]);
     
     // Help text or input mode
@@ -752,9 +806,9 @@ fn draw(frame: &mut Frame, app: &App) {
     };
     
     let help_style = if app.input_mode {
-        Style::default().fg(green).bold()
+        Style::default().fg(success).bold()
     } else if app.message.is_some() {
-        Style::default().fg(green)
+        Style::default().fg(success)
     } else {
         Style::default().fg(text)
     };
