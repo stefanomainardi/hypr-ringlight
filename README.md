@@ -24,9 +24,11 @@
 - Rounded inner corners for a polished look
 - **Multi-monitor support** with per-monitor toggle
 - **System tray integration** with full control
+- **Interactive TUI configurator** with live preview
 - **Multiple animations**: None, Pulse, Rainbow, Breathe
 - **Click-through**: doesn't block mouse input or scrolling
 - Configurable thickness, color, opacity, and glow radius
+- Config file support (`~/.config/hypr-ringlight/config.toml`)
 - Works with any Wayland compositor supporting `wlr-layer-shell`
 
 ## Screenshots
@@ -93,6 +95,25 @@ hypr-ringlight --thickness 120 --glow 100
 hypr-ringlight --bar-position bottom --bar-height 40
 ```
 
+### Interactive TUI Configurator
+
+```bash
+# Open the TUI configurator
+hypr-ringlight config
+```
+
+The TUI provides an interactive way to configure all ring light parameters with a beautiful Catppuccin-themed interface.
+
+**Controls:**
+- `↑/↓` or `j/k` - Navigate options
+- `Enter` - Select option
+- `Esc` - Go back / Exit
+- `q` - Quit
+
+**Live Preview:** If the ring light is already running, changes are applied in real-time! The TUI shows `[LIVE]` when connected or `[OFFLINE]` when the ring light isn't running.
+
+**Save Configuration:** Select "Save & Exit" to persist your settings to the config file.
+
 ## Configuration
 
 ### Command Line Options
@@ -108,6 +129,27 @@ hypr-ringlight --bar-position bottom --bar-height 40
 | `--animation-speed` | `120` | Animation speed (lower = faster) |
 | `--bar-height` | `35` | Height of your status bar in pixels |
 | `--bar-position` | `top` | Position of your bar: `top`, `bottom`, `left`, `right` |
+
+### Config File
+
+Settings are stored in `~/.config/hypr-ringlight/config.toml`:
+
+```toml
+color = "89b4fa"
+thickness = 80
+opacity = 1.0
+glow = 80
+corner_radius = 2.5
+animation = "none"
+animation_speed = 120
+bar_height = 35
+bar_position = "top"
+```
+
+The config file is:
+- Created automatically when you save from the TUI
+- Loaded on startup (CLI args override config file values)
+- Editable manually with any text editor
 
 ### Tray Menu
 

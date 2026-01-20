@@ -1,9 +1,13 @@
+mod config;
+mod ipc;
+mod tui;
+
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU8, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
-use clap::{Parser, ValueEnum};
+use clap::{Parser, Subcommand};
 use ksni::{menu::StandardItem, menu::SubMenu, menu::RadioGroup, menu::RadioItem, menu::CheckmarkItem, Tray, TrayService};
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, Region},
@@ -26,65 +30,57 @@ use wayland_client::{
     Connection, QueueHandle, Proxy,
 };
 
-/// Animation modes
-#[derive(Debug, Clone, Copy, PartialEq, ValueEnum, Default)]
-enum AnimationMode {
-    #[default]
-    None,
-    Pulse,
-    Rainbow,
-    Breathe,
-}
-
-/// Waybar position
-#[derive(Debug, Clone, Copy, PartialEq, ValueEnum, Default)]
-enum BarPosition {
-    #[default]
-    Top,
-    Bottom,
-    Left,
-    Right,
-}
+use config::{Config, BarPosition};
+use ipc::IpcState;
 
 /// Ring Light overlay for Hyprland/Wayland
 #[derive(Parser, Debug)]
 #[command(author, version, about)]
-struct Args {
+struct Cli {
+    #[command(subcommand)]
+    command: Option<Commands>,
+    
     /// Ring color in hex format (e.g., ff0000 for red)
-    #[arg(short, long, default_value = "ffffff")]
-    color: String,
+    #[arg(short, long)]
+    color: Option<String>,
 
     /// Ring thickness in pixels
-    #[arg(short, long, default_value_t = 80)]
-    thickness: u32,
+    #[arg(short, long)]
+    thickness: Option<u32>,
 
     /// Ring opacity (0.0 - 1.0)
-    #[arg(short, long, default_value_t = 1.0)]
-    opacity: f64,
+    #[arg(short, long)]
+    opacity: Option<f64>,
 
     /// Blur/glow radius (softness)
-    #[arg(short, long, default_value_t = 80)]
-    glow: u32,
+    #[arg(short, long)]
+    glow: Option<u32>,
 
     /// Corner radius multiplier (relative to thickness)
-    #[arg(long, default_value_t = 2.5)]
-    corner_radius: f64,
+    #[arg(long)]
+    corner_radius: Option<f64>,
 
-    /// Animation mode
-    #[arg(short, long, value_enum, default_value_t = AnimationMode::None)]
-    animation: AnimationMode,
+    /// Animation mode (none, pulse, rainbow, breathe)
+    #[arg(short, long)]
+    animation: Option<String>,
 
     /// Animation speed (frames per cycle, lower = faster)
-    #[arg(long, default_value_t = 120)]
-    animation_speed: u32,
+    #[arg(long)]
+    animation_speed: Option<u32>,
 
     /// Waybar/bar height in pixels (ring starts below/beside this)
-    #[arg(long, default_value_t = 35)]
-    bar_height: u32,
+    #[arg(long)]
+    bar_height: Option<u32>,
 
-    /// Waybar/bar position
-    #[arg(long, value_enum, default_value_t = BarPosition::Top)]
-    bar_position: BarPosition,
+    /// Waybar/bar position (top, bottom, left, right)
+    #[arg(long)]
+    bar_position: Option<String>,
+}
+
+#[derive(Subcommand, Debug)]
+enum Commands {
+    /// Interactive configuration TUI (live preview)
+    Config,
 }
 
 fn parse_hex_color(hex: &str) -> (u8, u8, u8) {
@@ -131,21 +127,25 @@ struct MonitorInfo {
     enabled: bool,
 }
 
-/// Shared state between tray and main app
+/// Extended shared state with IPC support
 struct SharedState {
-    visible: AtomicBool,
-    animation_mode: AtomicU8,
-    thickness: AtomicU32,
+    ipc: Arc<IpcState>,
     /// Map of output name -> enabled
     monitors: RwLock<Vec<MonitorInfo>>,
 }
 
 impl SharedState {
-    fn new(animation: u8, thickness: u32) -> Self {
+    fn new(
+        color: (u8, u8, u8),
+        thickness: u32,
+        opacity: f64,
+        glow: u32,
+        corner_radius: f64,
+        animation: u8,
+        animation_speed: u32,
+    ) -> Self {
         Self {
-            visible: AtomicBool::new(true),
-            animation_mode: AtomicU8::new(animation),
-            thickness: AtomicU32::new(thickness),
+            ipc: Arc::new(IpcState::new(color, thickness, opacity, glow, corner_radius, animation, animation_speed)),
             monitors: RwLock::new(Vec::new()),
         }
     }
@@ -204,9 +204,9 @@ impl Tray for RingLightTray {
     }
 
     fn menu(&self) -> Vec<ksni::MenuItem<Self>> {
-        let is_visible = self.state.visible.load(Ordering::Relaxed);
-        let current_anim = self.state.animation_mode.load(Ordering::Relaxed);
-        let current_thickness = self.state.thickness.load(Ordering::Relaxed);
+        let is_visible = self.state.ipc.is_visible();
+        let current_anim = self.state.ipc.get_animation_mode();
+        let current_thickness = self.state.ipc.get_thickness();
         let monitors = self.state.get_monitors();
         
         // Map thickness to preset index
@@ -223,8 +223,8 @@ impl Tray for RingLightTray {
             StandardItem {
                 label: if is_visible { "Hide Ring" } else { "Show Ring" }.into(),
                 activate: Box::new(|tray: &mut Self| {
-                    let current = tray.state.visible.load(Ordering::Relaxed);
-                    tray.state.visible.store(!current, Ordering::Relaxed);
+                    let current = tray.state.ipc.is_visible();
+                    tray.state.ipc.visible.store(!current, Ordering::Relaxed);
                 }),
                 ..Default::default()
             }.into(),
@@ -245,7 +245,7 @@ impl Tray for RingLightTray {
                                 3 => 160,
                                 _ => return,
                             };
-                            tray.state.thickness.store(val, Ordering::Relaxed);
+                            tray.state.ipc.thickness.store(val, Ordering::Relaxed);
                         }),
                         options: vec![
                             RadioItem { label: "Subtle (40px)".into(), ..Default::default() },
@@ -259,8 +259,8 @@ impl Tray for RingLightTray {
                         label: "Increase (+20px)".into(),
                         icon_name: "list-add-symbolic".into(),
                         activate: Box::new(|tray: &mut Self| {
-                            let current = tray.state.thickness.load(Ordering::Relaxed);
-                            tray.state.thickness.store((current + 20).min(200), Ordering::Relaxed);
+                            let current = tray.state.ipc.get_thickness();
+                            tray.state.ipc.thickness.store((current + 20).min(200), Ordering::Relaxed);
                         }),
                         ..Default::default()
                     }.into(),
@@ -268,8 +268,8 @@ impl Tray for RingLightTray {
                         label: "Decrease (-20px)".into(),
                         icon_name: "list-remove-symbolic".into(),
                         activate: Box::new(|tray: &mut Self| {
-                            let current = tray.state.thickness.load(Ordering::Relaxed);
-                            tray.state.thickness.store(current.saturating_sub(20).max(10), Ordering::Relaxed);
+                            let current = tray.state.ipc.get_thickness();
+                            tray.state.ipc.thickness.store(current.saturating_sub(20).max(10), Ordering::Relaxed);
                         }),
                         ..Default::default()
                     }.into(),
@@ -290,7 +290,7 @@ impl Tray for RingLightTray {
                     RadioGroup {
                         selected: current_anim as usize,
                         select: Box::new(|tray: &mut Self, idx| {
-                            tray.state.animation_mode.store(idx as u8, Ordering::Relaxed);
+                            tray.state.ipc.animation_mode.store(idx as u8, Ordering::Relaxed);
                         }),
                         options: vec![
                             RadioItem { label: "None".into(), ..Default::default() },
@@ -370,16 +370,11 @@ struct RingLight {
     
     start_time: Instant,
     
-    // Config
-    base_color: (u8, u8, u8),
-    base_opacity: f64,
-    glow: u32,
-    corner_radius_mult: f64,
-    animation_speed: u32,
+    // Static config (bar position can't change at runtime)
     bar_height: i32,
     bar_position: BarPosition,
     
-    // Shared state with tray
+    // Shared state with tray and IPC
     state: Arc<SharedState>,
 }
 
@@ -456,11 +451,15 @@ impl RingLight {
             .create_buffer(width as i32, height as i32, stride, wl_shm::Format::Argb8888)
             .expect("create buffer");
 
-        let is_visible = self.state.visible.load(Ordering::Relaxed) && monitor_enabled;
-        let anim_mode = self.state.animation_mode.load(Ordering::Relaxed);
-        let thickness = self.state.thickness.load(Ordering::Relaxed) as f64;
-        let glow = self.glow as f64;
-        let corner_radius = thickness * self.corner_radius_mult;
+        // Read all values from IpcState (allows real-time updates)
+        let is_visible = self.state.ipc.is_visible() && monitor_enabled;
+        let anim_mode = self.state.ipc.get_animation_mode();
+        let thickness = self.state.ipc.get_thickness() as f64;
+        let glow = self.state.ipc.get_glow() as f64;
+        let corner_radius = thickness * self.state.ipc.get_corner_radius();
+        let base_color = self.state.ipc.get_color();
+        let base_opacity = self.state.ipc.get_opacity();
+        let animation_speed = self.state.ipc.get_animation_speed();
         
         // Animation frame
         let elapsed = self.start_time.elapsed().as_secs_f64();
@@ -471,23 +470,23 @@ impl RingLight {
             ((0, 0, 0), 0.0)
         } else {
             match anim_mode {
-                0 => (self.base_color, self.base_opacity),
+                0 => (base_color, base_opacity),
                 1 => {
-                    let pulse = ((frame as f64 / self.animation_speed as f64) * 2.0 * std::f64::consts::PI).sin();
-                    let opacity = self.base_opacity * (0.5 + 0.5 * pulse);
-                    (self.base_color, opacity)
+                    let pulse = ((frame as f64 / animation_speed as f64) * 2.0 * std::f64::consts::PI).sin();
+                    let opacity = base_opacity * (0.5 + 0.5 * pulse);
+                    (base_color, opacity)
                 }
                 2 => {
-                    let hue = (frame as f64 / self.animation_speed as f64) % 1.0;
+                    let hue = (frame as f64 / animation_speed as f64) % 1.0;
                     let color = hsl_to_rgb(hue, 1.0, 0.5);
-                    (color, self.base_opacity)
+                    (color, base_opacity)
                 }
                 3 => {
-                    let breathe = ((frame as f64 / self.animation_speed as f64) * std::f64::consts::PI).sin();
-                    let opacity = self.base_opacity * breathe.abs().max(0.1);
-                    (self.base_color, opacity)
+                    let breathe = ((frame as f64 / animation_speed as f64) * std::f64::consts::PI).sin();
+                    let opacity = base_opacity * breathe.abs().max(0.1);
+                    (base_color, opacity)
                 }
-                _ => (self.base_color, self.base_opacity),
+                _ => (base_color, base_opacity),
             }
         };
 
@@ -710,10 +709,43 @@ impl ProvidesRegistryState for RingLight {
 fn main() {
     env_logger::init();
     
-    let args = Args::parse();
+    let cli = Cli::parse();
     
-    // Shared state
-    let state = Arc::new(SharedState::new(args.animation as u8, args.thickness));
+    // Handle subcommands
+    if let Some(Commands::Config) = cli.command {
+        if let Err(e) = tui::run() {
+            eprintln!("Error: {}", e);
+            std::process::exit(1);
+        }
+        return;
+    }
+    
+    // Load config file, then override with CLI args
+    let mut cfg = Config::load();
+    
+    if let Some(v) = cli.color { cfg.color = v; }
+    if let Some(v) = cli.thickness { cfg.thickness = v; }
+    if let Some(v) = cli.opacity { cfg.opacity = v; }
+    if let Some(v) = cli.glow { cfg.glow = v; }
+    if let Some(v) = cli.corner_radius { cfg.corner_radius = v; }
+    if let Some(v) = cli.animation { cfg.animation = v; }
+    if let Some(v) = cli.animation_speed { cfg.animation_speed = v; }
+    if let Some(v) = cli.bar_height { cfg.bar_height = v; }
+    if let Some(v) = cli.bar_position { cfg.bar_position = v; }
+    
+    // Create shared state with all config values
+    let state = Arc::new(SharedState::new(
+        parse_hex_color(&cfg.color),
+        cfg.thickness,
+        cfg.opacity,
+        cfg.glow,
+        cfg.corner_radius,
+        cfg.animation_mode(),
+        cfg.animation_speed,
+    ));
+
+    // Start IPC server for live config updates
+    ipc::start_server(state.ipc.clone());
 
     // Connect to Wayland
     let conn = Connection::connect_to_env().expect("Failed to connect to Wayland");
@@ -734,13 +766,8 @@ fn main() {
         monitors: HashMap::new(),
         output_names: HashMap::new(),
         start_time: Instant::now(),
-        base_color: parse_hex_color(&args.color),
-        base_opacity: args.opacity.clamp(0.0, 1.0),
-        glow: args.glow,
-        corner_radius_mult: args.corner_radius,
-        animation_speed: args.animation_speed,
-        bar_height: args.bar_height as i32,
-        bar_position: args.bar_position,
+        bar_height: cfg.bar_height as i32,
+        bar_position: cfg.bar_position_enum(),
         state: state.clone(),
     };
 

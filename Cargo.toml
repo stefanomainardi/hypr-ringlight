@@ -18,3 +18,9 @@ clap = { version = "4", features = ["derive"] }
 ksni = "0.2"
 env_logger = "0.11"
 log = "0.4"
+dirs = "6"
+serde = { version = "1", features = ["derive"] }
+toml = "0.8"
+ratatui = "0.29"
+crossterm = "0.28"
+serde_json = "1"
