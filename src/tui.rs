@@ -20,7 +20,6 @@ struct UiTheme {
     text: Color,        // Normal text
     success: Color,     // Green/success
     warning: Color,     // Yellow/warning
-    error: Color,       // Red/error
 }
 
 impl UiTheme {
@@ -46,7 +45,6 @@ impl UiTheme {
                 text,
                 success: Color::Rgb(166, 227, 161),  // Keep green
                 warning: Color::Rgb(249, 226, 175),  // Keep yellow
-                error: Color::Red,
             }
         } else {
             // Catppuccin Mocha defaults
@@ -57,7 +55,6 @@ impl UiTheme {
                 text: Color::Rgb(205, 214, 244),     // text
                 success: Color::Rgb(166, 227, 161),  // green
                 warning: Color::Rgb(249, 226, 175),  // yellow
-                error: Color::Red,
             }
         }
     }

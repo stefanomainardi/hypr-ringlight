@@ -28,11 +28,6 @@ fn omarchy_colors_path() -> PathBuf {
         .join("colors.toml")
 }
 
-/// Check if Omarchy is installed (by checking if the theme path exists)
-pub fn is_omarchy_installed() -> bool {
-    omarchy_colors_path().parent().map(|p| p.exists()).unwrap_or(false)
-}
-
 /// Load Omarchy theme colors
 pub fn load_omarchy_colors() -> Option<OmarchyColors> {
     let path = omarchy_colors_path();
