@@ -41,6 +41,8 @@
 - **Multiple animations**: None, Pulse, Rainbow, Breathe, Wave
 - **Click-through**: doesn't block mouse input or scrolling
 - **IPC support** for scripting and automation
+- **Omarchy theme integration**: automatically uses accent color from Omarchy themes
+- **Camera notifications**: alerts when webcam is in use to remind you to enable the ring light
 - Configurable thickness, color, opacity, and glow radius
 - Persistent configuration (`~/.config/hypr-ringlight/config.toml`)
 - Works with any Wayland compositor supporting `wlr-layer-shell`
@@ -50,6 +52,8 @@
 - Hyprland (or any Wayland compositor with `wlr-layer-shell` support)
 - System tray (e.g., Waybar with tray module)
 - D-Bus (for tray integration)
+- `fuser` command (for camera notifications, usually in `psmisc` package)
+- Notification daemon (e.g., `mako`, `dunst`) for camera alerts
 
 ## Installation
 
@@ -115,7 +119,7 @@ hypr-ringlight --bar-position bottom --bar-height 40
 hypr-ringlight config
 ```
 
-The TUI provides an interactive way to configure all ring light parameters with a Catppuccin-themed interface.
+The TUI provides an interactive way to configure all ring light parameters. It automatically uses your Omarchy theme colors if available, falling back to Catppuccin Mocha otherwise.
 
 ```
 ┌─────────────────────────────────────────┐
@@ -410,6 +414,69 @@ exec-once = hypr-ringlight
 exec-once = hypr-ringlight --color 00ffff --animation breathe --thickness 60
 ```
 
+## Omarchy Theme Integration
+
+hypr-ringlight integrates with [Omarchy](https://github.com/anomalyco/omarchy) to automatically use your theme colors.
+
+### Automatic Color Selection
+
+When hypr-ringlight starts:
+1. If no `--color` is specified and the config has the default white (`ffffff`)
+2. It reads the `accent` color from `~/.config/omarchy/current/theme/colors.toml`
+3. The ring light uses your theme's accent color automatically
+
+### TUI Theming
+
+The TUI configurator also reads Omarchy theme colors:
+- Uses `accent` for highlights and selected items
+- Uses `background` for the interface background
+- Uses `foreground` for text
+- Falls back to Catppuccin Mocha if Omarchy isn't available
+
+### Live Theme Reload
+
+When you change your Omarchy theme, you can reload the ring light color without restarting:
+
+```bash
+# Send SIGUSR2 to reload theme color
+killall -SIGUSR2 hypr-ringlight
+```
+
+### Integration Script
+
+For seamless Omarchy integration, install the helper script:
+
+```bash
+sudo cp scripts/omarchy-restart-hypr-ringlight /usr/local/bin/
+```
+
+This script can be called by `omarchy-theme-set` to automatically update the ring light when themes change.
+
+## Camera Notifications
+
+hypr-ringlight monitors your webcam and shows a desktop notification when it detects the camera is in use.
+
+### How It Works
+
+1. Monitors `/dev/video*` devices every 5 seconds using `fuser`
+2. When a camera becomes active and the ring light is hidden, shows a notification
+3. The notification reminds you to enable the ring light for video calls
+
+### Requirements
+
+- `fuser` command (usually part of `psmisc` package)
+- A notification daemon (e.g., `mako`, `dunst`)
+
+### Disabling Camera Notifications
+
+Camera monitoring runs automatically. To disable it, you can start hypr-ringlight with the ring already visible:
+
+```bash
+hypr-ringlight --visible
+```
+
+Or toggle visibility via the system tray immediately after starting.
+
 ## Troubleshooting
 
 | Issue | Solution |
@@ -420,6 +487,8 @@ exec-once = hypr-ringlight --color 00ffff --animation breathe --thickness 60
 | High CPU usage | Expected during animations; use `--animation none` |
 | TUI shows [OFFLINE] | Start the main ring light process first |
 | Changes not persisting | Use "Save & Exit" in TUI or modify from tray |
+| Camera notifications not showing | Install `psmisc` for `fuser` and ensure notification daemon is running |
+| Theme color not updating | Send `killall -SIGUSR2 hypr-ringlight` after changing Omarchy theme |
 
 ## Tech Stack
 
@@ -434,6 +503,8 @@ exec-once = hypr-ringlight --color 00ffff --animation breathe --thickness 60
 | `serde` / `serde_json` | Serialization |
 | `toml` | Config file parsing |
 | `clap` | Command line argument parsing |
+| `signal-hook` | Unix signal handling (SIGUSR2) |
+| `notify-rust` | Desktop notifications |
 
 ## Contributing
 
