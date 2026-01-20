@@ -31,9 +31,9 @@
 - Config file support (`~/.config/hypr-ringlight/config.toml`)
 - Works with any Wayland compositor supporting `wlr-layer-shell`
 
-## Screenshots
+## Demo
 
-*Coming soon*
+https://github.com/stefanomainardi/hypr-ringlight/raw/main/hypr-ringlight.mp4
 
 ## Requirements
 
