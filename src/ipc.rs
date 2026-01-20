@@ -289,3 +289,30 @@ pub fn send_command(cmd: &Command) -> Result<Option<State>, String> {
 pub fn is_running() -> bool {
     UnixStream::connect(socket_path()).is_ok()
 }
+
+impl IpcState {
+    /// Save current state to config file
+    pub fn save_to_config(&self) {
+        use crate::config::Config;
+        
+        // Load existing config to preserve bar settings
+        let existing = Config::load();
+        
+        let (r, g, b) = self.get_color();
+        let config = Config {
+            color: color_to_hex(r, g, b),
+            thickness: self.get_thickness(),
+            opacity: self.get_opacity(),
+            glow: self.get_glow(),
+            corner_radius: self.get_corner_radius(),
+            animation: animation_to_string(self.get_animation_mode()),
+            animation_speed: self.get_animation_speed(),
+            bar_height: existing.bar_height,
+            bar_position: existing.bar_position,
+        };
+        
+        if let Err(e) = config.save() {
+            eprintln!("Warning: Failed to save config: {}", e);
+        }
+    }
+}

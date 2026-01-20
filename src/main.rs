@@ -225,6 +225,7 @@ impl Tray for RingLightTray {
                 activate: Box::new(|tray: &mut Self| {
                     let current = tray.state.ipc.is_visible();
                     tray.state.ipc.visible.store(!current, Ordering::Relaxed);
+                    tray.state.ipc.save_to_config();
                 }),
                 ..Default::default()
             }.into(),
@@ -246,6 +247,7 @@ impl Tray for RingLightTray {
                                 _ => return,
                             };
                             tray.state.ipc.thickness.store(val, Ordering::Relaxed);
+                            tray.state.ipc.save_to_config();
                         }),
                         options: vec![
                             RadioItem { label: "Subtle (40px)".into(), ..Default::default() },
@@ -261,6 +263,7 @@ impl Tray for RingLightTray {
                         activate: Box::new(|tray: &mut Self| {
                             let current = tray.state.ipc.get_thickness();
                             tray.state.ipc.thickness.store((current + 20).min(200), Ordering::Relaxed);
+                            tray.state.ipc.save_to_config();
                         }),
                         ..Default::default()
                     }.into(),
@@ -270,6 +273,7 @@ impl Tray for RingLightTray {
                         activate: Box::new(|tray: &mut Self| {
                             let current = tray.state.ipc.get_thickness();
                             tray.state.ipc.thickness.store(current.saturating_sub(20).max(10), Ordering::Relaxed);
+                            tray.state.ipc.save_to_config();
                         }),
                         ..Default::default()
                     }.into(),
@@ -291,6 +295,7 @@ impl Tray for RingLightTray {
                         selected: current_anim as usize,
                         select: Box::new(|tray: &mut Self, idx| {
                             tray.state.ipc.animation_mode.store(idx as u8, Ordering::Relaxed);
+                            tray.state.ipc.save_to_config();
                         }),
                         options: vec![
                             RadioItem { label: "None".into(), ..Default::default() },
