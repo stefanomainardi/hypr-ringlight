@@ -14,7 +14,7 @@
 
 ---
 
-**hypr-ringlight** displays a glowing ring light effect around the edges of your screen(s). Inspired by the Edge Light feature introduced in macOS Sequoia.
+**hypr-ringlight** displays a glowing ring light effect around the edges of your screen(s). Inspired by the Edge Light feature introduced in macOS Tahoe.
 
 > **Note**: This project is experimental and under active development.
 
