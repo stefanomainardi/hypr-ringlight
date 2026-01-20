@@ -72,6 +72,8 @@ pub struct IpcState {
     pub visible: std::sync::atomic::AtomicBool,
     /// Monitors list (id, display_name, enabled)
     pub monitors: RwLock<Vec<(String, String, bool)>>,
+    /// List of monitor IDs that should be disabled (from config)
+    disabled_monitors: RwLock<Vec<String>>,
 }
 
 impl IpcState {
@@ -83,6 +85,7 @@ impl IpcState {
         corner_radius: f64,
         animation: u8,
         animation_speed: u32,
+        disabled_monitors: Vec<String>,
     ) -> Self {
         Self {
             color_r: AtomicU8::new(color.0),
@@ -96,6 +99,7 @@ impl IpcState {
             animation_speed: AtomicU32::new(animation_speed),
             visible: std::sync::atomic::AtomicBool::new(true),
             monitors: RwLock::new(Vec::new()),
+            disabled_monitors: RwLock::new(disabled_monitors),
         }
     }
 
@@ -153,7 +157,12 @@ impl IpcState {
     pub fn add_monitor(&self, id: String, display_name: String) {
         if let Ok(mut monitors) = self.monitors.write() {
             if !monitors.iter().any(|(mid, _, _)| mid == &id) {
-                monitors.push((id, display_name, true));
+                // Check if this monitor should be disabled (from config)
+                let should_disable = self.disabled_monitors
+                    .read()
+                    .map(|d| d.contains(&id))
+                    .unwrap_or(false);
+                monitors.push((id, display_name, !should_disable));
             }
         }
     }
@@ -411,6 +420,13 @@ impl IpcState {
         // Load existing config to preserve bar settings
         let existing = Config::load();
         
+        // Get list of disabled monitors
+        let disabled_monitors: Vec<String> = self.get_monitors()
+            .into_iter()
+            .filter(|m| !m.enabled)
+            .map(|m| m.id)
+            .collect();
+        
         let (r, g, b) = self.get_color();
         let config = Config {
             color: color_to_hex(r, g, b),
@@ -422,6 +438,7 @@ impl IpcState {
             animation_speed: self.get_animation_speed(),
             bar_height: existing.bar_height,
             bar_position: existing.bar_position,
+            disabled_monitors,
         };
         
         if let Err(e) = config.save() {

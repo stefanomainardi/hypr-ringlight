@@ -40,6 +40,10 @@ pub struct Config {
     /// Waybar/bar position: top, bottom, left, right
     #[serde(default = "default_bar_position")]
     pub bar_position: String,
+
+    /// List of disabled monitor IDs (connector names like "DP-2", "HDMI-1")
+    #[serde(default)]
+    pub disabled_monitors: Vec<String>,
 }
 
 fn default_color() -> String { "ffffff".to_string() }
@@ -64,6 +68,7 @@ impl Default for Config {
             animation_speed: default_animation_speed(),
             bar_height: default_bar_height(),
             bar_position: default_bar_position(),
+            disabled_monitors: Vec::new(),
         }
     }
 }

@@ -141,9 +141,10 @@ impl SharedState {
         corner_radius: f64,
         animation: u8,
         animation_speed: u32,
+        disabled_monitors: Vec<String>,
     ) -> Self {
         Self {
-            ipc: Arc::new(IpcState::new(color, thickness, opacity, glow, corner_radius, animation, animation_speed)),
+            ipc: Arc::new(IpcState::new(color, thickness, opacity, glow, corner_radius, animation, animation_speed, disabled_monitors)),
         }
     }
     
@@ -735,6 +736,7 @@ fn main() {
         cfg.corner_radius,
         cfg.animation_mode(),
         cfg.animation_speed,
+        cfg.disabled_monitors.clone(),
     ));
 
     // Start IPC server for live config updates
