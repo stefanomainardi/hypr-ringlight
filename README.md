@@ -209,75 +209,60 @@ Changes made from the tray are automatically saved to the config file.
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              hypr-ringlight                                 │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-┌──────────────────────────────────────────────────────────────────┐
-│                         Main Process                             │
-│                      (hypr-ringlight)                            │
-│                                                                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │   Wayland   │  │   System    │  │    IPC      │              │
-│  │  Surfaces   │  │    Tray     │  │   Server    │              │
-│  │             │  │   (ksni)    │  │             │              │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
-│         │                │                │                      │
-│         ▼                ▼                ▼                      │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                     SharedState (Arc<Mutex>)                ││
-│  │  ┌─────────────────────────────────────────────────────┐    ││
-│  │  │ IpcState                                            │    ││
-│  │  │  • color: String           • animation: String      │    ││
-│  │  │  • thickness: u32          • animation_speed: u32   │    ││
-│  │  │  • opacity: f32            • visible: bool          │    ││
-│  │  │  • glow: u32               • disabled_monitors: Vec │    ││
-│  │  └─────────────────────────────────────────────────────┘    ││
-│  └─────────────────────────────────────────────────────────────┘│
-│         │                                                        │
-│         ▼                                                        │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    Render Loop (calloop)                    ││
-│  │  • Reads SharedState                                        ││
-│  │  • Renders ring on each monitor surface                     ││
-│  │  • Handles animations (color/opacity changes per frame)     ││
-│  └─────────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────────┘
-         ▲
-         │ Unix Socket
-         │ /run/user/{uid}/hypr-ringlight.sock
-         │
-         ▼
-┌──────────────────────────────────────────────────────────────────┐
-│                       TUI Process                                │
-│                   (hypr-ringlight config)                        │
-│                                                                  │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                    Ratatui Interface                        ││
-│  │  • Color picker                                             ││
-│  │  • Slider controls (thickness, opacity, glow, etc.)         ││
-│  │  • Animation selector                                       ││
-│  │  • Monitor manager                                          ││
-│  │  • ON/OFF toggle                                            ││
-│  └─────────────────────────────────────────────────────────────┘│
-│                              │                                   │
-│                              ▼                                   │
-│  ┌─────────────────────────────────────────────────────────────┐│
-│  │                      IPC Client                             ││
-│  │  Sends JSON commands to main process                        ││
-│  │  Receives responses (monitors list, current state)          ││
-│  └─────────────────────────────────────────────────────────────┘│
-└──────────────────────────────────────────────────────────────────┘
-
-┌─────────────────────────────────────────────────────────────────┐
-│                        Config File                              │
-│              ~/.config/hypr-ringlight/config.toml               │
-│                                                                 │
-│  • Loaded on startup                                            │
-│  • Auto-saved on tray/TUI changes                               │
-│  • CLI args override config values                              │
-└─────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph Main["Main Process (hypr-ringlight)"]
+        direction TB
+        subgraph Input["Input Sources"]
+            Wayland["Wayland Surfaces<br><i>smithay-client-toolkit</i>"]
+            Tray["System Tray<br><i>ksni / D-Bus</i>"]
+            IPC["IPC Server<br><i>Unix Socket</i>"]
+        end
+        
+        State["SharedState<br><code>Arc&lt;Mutex&lt;IpcState&gt;&gt;</code>"]
+        
+        subgraph StateFields[" "]
+            Fields["color | thickness | opacity | glow<br>animation | visible | disabled_monitors"]
+        end
+        
+        Render["Render Loop<br><i>calloop event loop</i>"]
+    end
+    
+    subgraph TUI["TUI Process (hypr-ringlight config)"]
+        direction TB
+        Ratatui["Ratatui Interface<br><i>Color, Thickness, Animation, Monitors</i>"]
+        Client["IPC Client"]
+    end
+    
+    Config[("Config File<br>~/.config/hypr-ringlight/config.toml")]
+    Socket{{"Unix Socket<br>/run/user/{uid}/hypr-ringlight.sock"}}
+    Monitor1["Monitor 1"]
+    Monitor2["Monitor 2"]
+    MonitorN["Monitor N..."]
+    
+    Wayland --> State
+    Tray --> State
+    IPC --> State
+    State --> StateFields
+    StateFields --> Render
+    
+    Render --> Monitor1
+    Render --> Monitor2
+    Render --> MonitorN
+    
+    Ratatui --> Client
+    Client <--> Socket
+    Socket <--> IPC
+    
+    Config -.->|"Load on startup"| Main
+    State -.->|"Auto-save"| Config
+    
+    style Main fill:#1e1e2e,stroke:#89b4fa,stroke-width:2px,color:#cdd6f4
+    style TUI fill:#1e1e2e,stroke:#a6e3a1,stroke-width:2px,color:#cdd6f4
+    style Config fill:#313244,stroke:#f9e2af,stroke-width:2px,color:#cdd6f4
+    style Socket fill:#313244,stroke:#fab387,stroke-width:2px,color:#cdd6f4
+    style State fill:#45475a,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4
+    style Render fill:#45475a,stroke:#f38ba8,stroke-width:2px,color:#cdd6f4
 ```
 
 ### Component Overview
